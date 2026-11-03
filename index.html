@@ -119,6 +119,10 @@
     text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint);
     font-weight:600; padding:11px 14px; border-bottom:1px solid var(--rule-strong); background:var(--surface-2); white-space:nowrap;
   }
+  thead th[data-sort-key]{ cursor:pointer; user-select:none; }
+  thead th[data-sort-key]:hover{ color:var(--ink-muted); }
+  thead th.sorted-asc::after{ content:" \2191"; color:var(--accent); }
+  thead th.sorted-desc::after{ content:" \2193"; color:var(--accent); }
   tbody td{ padding:12px 14px; border-bottom:1px solid var(--rule); vertical-align:middle; color:var(--ink-muted); }
   tbody tr{ cursor:pointer; } tbody tr:hover{ background:var(--surface-2); } tbody tr:last-child td{ border-bottom:none; }
   td.case-id{ font-family:'IBM Plex Mono', monospace; color:var(--ink); font-weight:600; white-space:nowrap; }
@@ -195,6 +199,11 @@
   .toast.error{ background:var(--danger); } .toast.success{ background:var(--pass); }
 
   .hint-box{ background:var(--accent-soft); color:var(--accent-ink); border-radius:8px; padding:12px 14px; font-size:13px; line-height:1.55; margin-bottom:18px; }
+  .photo-grid{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+  .photo-thumb{ width:84px; height:84px; border-radius:8px; overflow:hidden; border:1px solid var(--rule); background:var(--surface-2); cursor:pointer; }
+  .photo-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .photo-thumb .ph-loading{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--ink-faint); font-size:11px; }
+  .photo-add-label{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
   [hidden]{ display:none !important; }
 
   /* ---- Login screen ---- */
@@ -296,7 +305,16 @@
     <div class="table-card">
       <div class="table-scroll">
         <table>
-          <thead><tr><th>Case ID</th><th>Patient / Doctor</th><th>Region</th><th>Stage</th><th>Status</th><th>Priority</th><th>Owner</th><th>Days in Stage</th></tr></thead>
+          <thead><tr>
+            <th data-sort-key="id">Case ID</th>
+            <th data-sort-key="patient">Patient / Doctor</th>
+            <th data-sort-key="region">Region</th>
+            <th data-sort-key="stage">Stage</th>
+            <th data-sort-key="status">Status</th>
+            <th data-sort-key="priority">Priority</th>
+            <th data-sort-key="owner">Owner</th>
+            <th data-sort-key="days">Days in Stage</th>
+          </tr></thead>
           <tbody id="tableBody"></tbody>
         </table>
       </div>
@@ -355,6 +373,7 @@
           <span class="badge" id="dPriorityBadge"></span>
         </div>
       </div>
+      <button class="btn primary small" id="saveEditBtn" type="button" hidden>Save Changes</button>
       <button class="btn small" id="editToggleBtn" type="button">Start Editing</button>
       <button class="btn ghost small" data-close-detail type="button">Close</button>
     </div>
@@ -370,13 +389,58 @@
   var ROOT_CAUSES = ["Material Defect","Fabrication Error","Fit / Bite Discrepancy","Shipping Damage","Design / Prescription Error","Other"];
   var DISPOSITIONS = ["Reprocess & Clear","Reissue (New Box — Local)","Reissue (Same Box — Overseas)","Scrap"];
 
+  // Inline-editable field definitions. `group` ties each field to the
+  // canEditGroup() permission check above AND to the enforce_case_edit_scope
+  // trigger's allowed-columns list in schema.sql — if you add a field here,
+  // add the column to that trigger's array too, for the role that should own it.
+  var FIELD_DEFS = {
+    identification: [
+      {name:"case_origin", label:"Case Origin", type:"select", options:["Local","Overseas"]},
+      {name:"box_label", label:"Box Label", type:"text"},
+      {name:"region", label:"Region / Branch", type:"select", options:["Lahore","Islamabad","Karachi"]},
+      {name:"container_type", label:"Container Type", type:"select", options:["Box","Pouch"]},
+      {name:"patient_name", label:"Patient", type:"text"},
+      {name:"treating_doctor", label:"Treating Doctor", type:"text"},
+      {name:"aligner_stages", label:"Aligner Stage(s)", type:"text"},
+      {name:"transfer_tray_issued", label:"Transfer Tray Issued", type:"select", options:["None","Upper","Lower","Both"]}
+    ],
+    reportedIssue: [
+      {name:"date_received", label:"Date Received", type:"date"},
+      {name:"return_source", label:"Return Source", type:"select", options:["Clinic","Doctor","Customer"]},
+      {name:"issue_category", label:"Issue Category", type:"select", options:["Fit / Comfort","Material Defect","Attachment / IPR","Wrong Aligner Shipped","Damaged in Transit","Missing Stage","Other"]},
+      {name:"reported_by", label:"Reported By", type:"text"},
+      {name:"intake_recipient", label:"Intake Recipient", type:"text"}
+    ],
+    resolution: [
+      {name:"root_cause_category", label:"Root Cause Category", type:"select", options:ROOT_CAUSES},
+      {name:"disposition", label:"Disposition", type:"select", options:DISPOSITIONS}
+    ],
+    assignment: [
+      {name:"current_owner", label:"Current Owner", type:"text"},
+      {name:"priority", label:"Priority", type:"select", options:["Low","Medium","High","Urgent"]}
+    ]
+  };
+
   var state = {
-    sb: null, session: null,
+    sb: null, session: null, profile: null,
     cases: [], filtered: [],
-    filter: { q:"", stage:"", status:"", region:"" },
+    filter: { q:"", stage:"", status:"", region:"", overdue:false },
+    sort: { key:"days", dir:"desc" },
     openCaseId: null, editing: false,
     renewTimer: null, casesChannel: null, detailChannel: null
   };
+
+  var SORT_ACCESSORS = {
+    id: function(c){ return c.id || ""; },
+    patient: function(c){ return (c.patient_name||"").toLowerCase(); },
+    region: function(c){ return (c.region||"").toLowerCase(); },
+    stage: function(c){ return c.current_stage || 0; },
+    status: function(c){ return (c.stage_status||"").toLowerCase(); },
+    priority: function(c){ return {Low:0,Medium:1,High:2,Urgent:3}[c.priority] || 0; },
+    owner: function(c){ return (c.current_owner||"").toLowerCase(); },
+    days: function(c){ return daysSince(c.last_stage_change_at); }
+  };
+  var SORT_DEFAULT_DIR = { id:"asc", patient:"asc", region:"asc", stage:"desc", status:"asc", priority:"desc", owner:"asc", days:"desc" };
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]; }); }
   function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -430,10 +494,47 @@
     document.getElementById("app").hidden = true;
     document.getElementById("loginScreen").hidden = false;
   }
-  function showApp(){
+
+  // -----------------------------------------------------------------------
+  // Roles & permissions — state.profile is loaded once per sign-in from the
+  // `profiles` table (see schema.sql section 5). RLS + the enforce_case_edit_
+  // scope trigger are the REAL enforcement; everything here is just the UI
+  // mirroring those same rules so people don't hit walls they can't see.
+  // -----------------------------------------------------------------------
+  var ROLE_LABELS = { admin:"Admin", region_support:"Region Support", qcd:"QCD", production_control:"Production Control", viewer:"Viewer" };
+  function myRole(){ return (state.profile && state.profile.role) || "viewer"; }
+  function canWriteAtAll(){ return myRole() !== "viewer"; }
+  function canCreateCase(){ return ["admin","region_support","qcd"].indexOf(myRole()) !== -1; }
+  function canDeleteCase(){ return myRole() === "admin"; }
+  function canEditGroup(group){
+    var r = myRole();
+    if(r === "admin") return true;
+    if(group === "intake") return r === "region_support";
+    if(group === "resolution") return r === "qcd";
+    return false;
+  }
+  function canDoStageAction(stage){
+    var r = myRole();
+    if(r === "admin") return true;
+    if(stage === 1) return r === "region_support";
+    if(stage === 2) return r === "qcd";
+    if(stage === 3) return r === "production_control";
+    return false;
+  }
+
+  async function loadProfile(){
+    try{
+      var res = await state.sb.from("profiles").select("*").eq("id", state.session.user.id).maybeSingle();
+      state.profile = res.data || { role:"viewer", full_name:"" };
+    }catch(err){ state.profile = { role:"viewer", full_name:"" }; }
+  }
+
+  async function showApp(){
     document.getElementById("loginScreen").hidden = true;
     document.getElementById("app").hidden = false;
-    document.getElementById("viewerChip").textContent = state.session.user.email;
+    await loadProfile();
+    document.getElementById("viewerChip").textContent = state.session.user.email + " · " + (ROLE_LABELS[myRole()] || "Viewer");
+    document.getElementById("newCaseBtn").hidden = !canCreateCase();
     setStatus(true, "Live");
     subscribeCases();
   }
@@ -500,6 +601,7 @@
       if(state.filter.stage && String(c.current_stage) !== state.filter.stage) return false;
       if(state.filter.status && c.case_status !== state.filter.status) return false;
       if(state.filter.region && c.region !== state.filter.region) return false;
+      if(state.filter.overdue && !(isOpenCase(c) && daysSince(c.last_stage_change_at) >= 7)) return false;
       if(q){
         var hay = [c.id, c.patient_name, c.treating_doctor, c.box_label].join(" ").toLowerCase();
         if(hay.indexOf(q) === -1) return false;
@@ -525,26 +627,57 @@
     ];
     var grid = document.getElementById("statGrid");
     grid.innerHTML = tiles.map(function(t){
-      var active = (t.key === "" && !state.filter.stage) || (t.key !== "" && t.key !== "__overdue" && state.filter.stage === t.key);
+      var active = t.key === "__overdue" ? state.filter.overdue
+        : (t.key === "" && !state.filter.stage) || (t.key !== "" && state.filter.stage === t.key);
       return '<div class="stat-tile '+(t.crit?"crit":"")+(active?" active":"")+'" data-stage-key="'+esc(t.key)+'"><div class="stat-num">'+t.num+'</div><div class="stat-label">'+esc(t.label)+'</div></div>';
     }).join("");
     Array.prototype.forEach.call(grid.querySelectorAll(".stat-tile"), function(el){
       el.addEventListener("click", function(){
         var key = el.getAttribute("data-stage-key");
-        if(key !== "__overdue"){ document.getElementById("filterStage").value = key; state.filter.stage = key; applyFilters(); renderTable(); }
-        else toast("Showing all cases — sort by Days in Stage to review the 7+ day list.");
+        if(key === "__overdue"){
+          state.filter.overdue = !state.filter.overdue;
+        } else {
+          state.filter.stage = key;
+          document.getElementById("filterStage").value = key;
+        }
+        applyFilters(); renderTable(); renderStats();
+      });
+    });
+  }
+
+  function updateSortIndicators(){
+    Array.prototype.forEach.call(document.querySelectorAll("thead th[data-sort-key]"), function(th){
+      th.classList.remove("sorted-asc", "sorted-desc");
+      if(th.getAttribute("data-sort-key") === state.sort.key) th.classList.add(state.sort.dir === "asc" ? "sorted-asc" : "sorted-desc");
+    });
+  }
+  function setupSorting(){
+    Array.prototype.forEach.call(document.querySelectorAll("thead th[data-sort-key]"), function(th){
+      th.addEventListener("click", function(){
+        var key = th.getAttribute("data-sort-key");
+        if(state.sort.key === key){ state.sort.dir = state.sort.dir === "asc" ? "desc" : "asc"; }
+        else { state.sort.key = key; state.sort.dir = SORT_DEFAULT_DIR[key] || "asc"; }
+        renderTable();
       });
     });
   }
 
   function renderTable(){
     var body = document.getElementById("tableBody");
-    document.getElementById("resultCount").textContent = state.filtered.length + " of " + state.cases.length + " shown";
+    var countText = state.filtered.length + " of " + state.cases.length + " shown";
+    if(state.filter.overdue) countText += " · 7+ days in stage only";
+    document.getElementById("resultCount").textContent = countText;
+    updateSortIndicators();
     if(state.filtered.length === 0){
       body.innerHTML = '<tr><td colspan="8"><div class="empty-row">No cases match — try clearing filters, or log a new case.</div></td></tr>';
       return;
     }
-    var rows = state.filtered.slice().sort(function(a,b){ return daysSince(b.last_stage_change_at) - daysSince(a.last_stage_change_at); });
+    var acc = SORT_ACCESSORS[state.sort.key] || SORT_ACCESSORS.days;
+    var dir = state.sort.dir === "asc" ? 1 : -1;
+    var rows = state.filtered.slice().sort(function(a,b){
+      var av = acc(a), bv = acc(b);
+      if(av < bv) return -1 * dir; if(av > bv) return 1 * dir; return 0;
+    });
     body.innerHTML = rows.map(function(c){
       var days = daysSince(c.last_stage_change_at);
       var dCls = days>=7 ? "days-tag crit" : days>=3 ? "days-tag warn" : "days-tag";
@@ -568,6 +701,7 @@
   document.getElementById("filterStage").addEventListener("change", function(e){ state.filter.stage = e.target.value; applyFilters(); renderTable(); renderStats(); });
   document.getElementById("filterStatus").addEventListener("change", function(e){ state.filter.status = e.target.value; applyFilters(); renderTable(); });
   document.getElementById("filterRegion").addEventListener("change", function(e){ state.filter.region = e.target.value; applyFilters(); renderTable(); });
+  setupSorting();
 
   // ---------------------------------------------------------------------
   // New case
@@ -645,7 +779,7 @@
 
   document.getElementById("editToggleBtn").addEventListener("click", async function(){
     if(state.editing){
-      state.editing = false; stopRenew(); refreshDetail(state.openCaseId); return;
+      state.editing = false; stopRenew(); toast("Editing cancelled — no changes saved."); refreshDetail(state.openCaseId); return;
     }
     try{
       var res = await tryAcquireLock(state.openCaseId);
@@ -657,6 +791,25 @@
       }
       refreshDetail(state.openCaseId);
     }catch(err){ toast("Couldn't get an edit lock: " + (err && err.message ? err.message : "unknown error"), "error"); }
+  });
+
+  document.getElementById("saveEditBtn").addEventListener("click", async function(){
+    if(!state.openCaseId) return;
+    var inputs = document.querySelectorAll("#detailBody [data-edit-field]");
+    if(inputs.length === 0){ toast("Nothing editable here for your role.", "error"); return; }
+    var patch = {};
+    Array.prototype.forEach.call(inputs, function(el){ patch[el.getAttribute("data-edit-field")] = el.value; });
+    var btn = document.getElementById("saveEditBtn");
+    btn.disabled = true;
+    try{
+      var res = await state.sb.from("cases").update(patch).eq("id", state.openCaseId);
+      if(res.error){ toast("Couldn't save: " + res.error.message, "error"); return; }
+      await logActivity(state.openCaseId, "Edited case details.");
+      toast("Changes saved.", "success");
+      state.editing = false; stopRenew();
+      refreshDetail(state.openCaseId);
+    }catch(err){ toast("Couldn't save: " + (err && err.message ? err.message : "unknown error"), "error"); }
+    finally{ btn.disabled = false; }
   });
 
   // Atomic lock: an UPDATE with a WHERE clause that only matches when the
@@ -686,6 +839,27 @@
   function kv(k,v){ return '<div class="kv"><span class="k">'+esc(k)+'</span><span class="v">'+(v ? esc(v) : "—")+'</span></div>'; }
   function actionBtn(id, label, cls){ return '<button class="btn '+(cls||"")+'" id="'+id+'" type="button">'+esc(label)+'</button>'; }
 
+  // Renders one FIELD_DEFS entry either as a live input (when `editable`) or
+  // as a read-only value — same shape either way so layout doesn't jump.
+  function efield(def, c, editable){
+    var val = c[def.name];
+    if(editable){
+      if(def.type === "select"){
+        var opts = '<option value="">Select…</option>' + def.options.map(function(o){ return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>'; }).join("");
+        return '<div class="field"><label>'+esc(def.label)+'</label><select class="select" data-edit-field="'+def.name+'">'+opts+'</select></div>';
+      }
+      var type = def.type === "date" ? "date" : "text";
+      return '<div class="field"><label>'+esc(def.label)+'</label><input class="input" type="'+type+'" data-edit-field="'+def.name+'" value="'+esc(val||"")+'"></div>';
+    }
+    return '<div class="field"><label>'+esc(def.label)+'</label><div style="font-size:13.5px;color:var(--ink);font-weight:500;padding-top:2px;">'+(val?esc(val):"—")+'</div></div>';
+  }
+  function etextarea(name, label, value, editable, placeholder){
+    if(editable){
+      return '<div class="field" style="margin-top:14px;"><label>'+esc(label)+'</label><textarea data-edit-field="'+name+'" placeholder="'+esc(placeholder||"")+'">'+esc(value||"")+'</textarea></div>';
+    }
+    return '<div class="kv" style="display:block;"><div class="k" style="margin-bottom:5px;">'+esc(label)+'</div><div class="v" style="text-align:left;font-weight:400;">'+(value?esc(value):"—")+'</div></div>';
+  }
+
   function renderDetail(c, log, reissueHistory){
     document.getElementById("dCaseId").textContent = c.id;
     var closed = !isOpenCase(c);
@@ -696,13 +870,20 @@
 
     var days = daysSince(c.last_stage_change_at);
     var editBtn = document.getElementById("editToggleBtn");
-    editBtn.textContent = state.editing ? "Done Editing" : "Start Editing";
-    editBtn.classList.toggle("primary", state.editing);
+    var saveBtn = document.getElementById("saveEditBtn");
+    if(myRole() === "viewer"){
+      editBtn.hidden = true; saveBtn.hidden = true;
+    } else {
+      editBtn.hidden = false;
+      editBtn.textContent = state.editing ? "Cancel" : "Start Editing";
+      editBtn.classList.remove("primary");
+      saveBtn.hidden = !state.editing;
+    }
 
     var lockActive = c.locked_by && c.locked_until && new Date(c.locked_until) > new Date();
     var lockHtml = "";
     if(state.editing){
-      lockHtml = '<div class="lock-banner mine">You have this case open for editing — the lock auto-renews and releases when you close or click "Done Editing".</div>';
+      lockHtml = '<div class="lock-banner mine">You have this case open for editing — fields outside your role show as read-only. The lock releases when you click "Save Changes" or "Cancel".</div>';
     } else if(lockActive && c.locked_by !== state.session.user.email){
       lockHtml = '<div class="lock-banner busy">Currently being edited by <b>'+esc(c.locked_by)+'</b>. You can view live, but changes are blocked until they finish (locks expire automatically after a couple of minutes of inactivity).</div>';
     }
@@ -710,12 +891,18 @@
     var html = lockHtml + stageStrip(c.current_stage);
     if(!closed) html += '<div class="action-row" id="stageActions"></div>';
 
-    html += '<fieldset><legend>Identification</legend><div class="kv-grid">' +
-      kv("Case Origin", c.case_origin) + kv("Box Label", c.box_label) +
-      kv("Region / Branch", c.region) + kv("Container Type", c.container_type) +
-      kv("Patient", c.patient_name) + kv("Treating Doctor", c.treating_doctor) +
-      kv("Aligner Stage(s)", c.aligner_stages) + kv("Transfer Tray Issued", c.transfer_tray_issued) +
+    // Which groups THIS user can actually edit, right now, while editing —
+    // mirrors canEditGroup()/canWriteAtAll() above; the real gate is still
+    // server-side (RLS + enforce_case_edit_scope trigger in schema.sql).
+    var canIntake = state.editing && canEditGroup("intake");
+    var canRes = state.editing && canEditGroup("resolution");
+    var canAssign = state.editing && canWriteAtAll();
+
+    html += '<fieldset><legend>Identification</legend><div class="field-grid">' +
+      FIELD_DEFS.identification.map(function(f){ return efield(f, c, canIntake); }).join("") +
       '</div></fieldset>';
+
+    html += '<div id="photoSection"></div>';
 
     if(c.linked_case_id){
       html += '<div class="hint-box">' + (c.linked_case_type === "reissued_as"
@@ -726,21 +913,24 @@
       html += '<div class="hint-box">Overseas reissue history: ' + reissueHistory.map(function(r){ return "→ " + esc(r.new_case_id) + " (" + esc(r.reissued_on) + ")"; }).join(", ") + '</div>';
     }
 
-    html += '<fieldset><legend>Reported Issue</legend><div class="kv-grid">' +
-      kv("Date Received", c.date_received) + kv("Return Source", c.return_source) +
-      kv("Issue Category", c.issue_category) + kv("Reported By", c.reported_by) +
-      kv("Intake Recipient", c.intake_recipient) + kv("Current Owner", c.current_owner) + '</div>';
-    html += '<div class="kv" style="display:block;"><div class="k" style="margin-bottom:5px;">Issue Description</div><div class="v" style="text-align:left;font-weight:400;">' + (esc(c.issue_description) || "—") + '</div></div></fieldset>';
+    html += '<fieldset><legend>Reported Issue</legend><div class="field-grid">' +
+      FIELD_DEFS.reportedIssue.map(function(f){ return efield(f, c, canIntake); }).join("") +
+      '</div>' + etextarea("issue_description", "Issue Description", c.issue_description, canIntake, "In the reporting person's own words") + '</fieldset>';
+
+    html += '<fieldset><legend>Assignment</legend><div class="field-grid">' +
+      FIELD_DEFS.assignment.map(function(f){ return efield(f, c, canAssign); }).join("") +
+      '</div></fieldset>';
 
     html += '<fieldset><legend>Timing</legend><div class="kv-grid">' +
       kv("Dispatched to Stage 2", c.dispatched_to_stage2) + kv("Received at Stage 2", c.received_at_stage2) +
       kv("Dispatched to Stage 3", c.dispatched_to_stage3) + kv("Shipped Date", c.shipped_date) +
       kv("Days in Current Stage", closed ? "—" : days + " day" + (days===1?"":"s")) + '</div></fieldset>';
 
-    if(c.root_cause_category || c.disposition || c.evaluation_notes || c.action_taken){
-      html += '<fieldset><legend>Resolution</legend><div class="kv-grid">' + kv("Root Cause Category", c.root_cause_category) + kv("Disposition", c.disposition) + '</div>';
-      if(c.evaluation_notes) html += '<div class="kv" style="display:block;"><div class="k" style="margin-bottom:5px;">Evaluation Notes</div><div class="v" style="text-align:left;font-weight:400;">'+esc(c.evaluation_notes)+'</div></div>';
-      if(c.action_taken) html += '<div class="kv" style="display:block;"><div class="k" style="margin-bottom:5px;">Action Taken</div><div class="v" style="text-align:left;font-weight:400;">'+esc(c.action_taken)+'</div></div>';
+    if(c.root_cause_category || c.disposition || c.evaluation_notes || c.action_taken || canRes){
+      html += '<fieldset><legend>Resolution</legend><div class="field-grid">' +
+        FIELD_DEFS.resolution.map(function(f){ return efield(f, c, canRes); }).join("") + '</div>';
+      html += etextarea("evaluation_notes", "Evaluation Notes", c.evaluation_notes, canRes, "What was actually found");
+      html += etextarea("action_taken", "Action Taken", c.action_taken, canRes, "What was reprocessed / remanufactured");
       html += '</fieldset>';
     }
 
@@ -748,24 +938,118 @@
       log.map(function(l){ return '<li class="log-item"><div class="log-meta">'+fmtDateTime(l.ts)+' &middot; '+esc(l.actor)+'</div><div class="log-note">'+esc(l.note)+'</div></li>'; }).join("") +
       '</ul></fieldset>';
 
-    if(state.editing){
+    if(state.editing && canDeleteCase()){
       html += '<fieldset><legend>Danger Zone</legend><button class="btn danger small" id="deleteCaseBtn" type="button">Delete This Case Record</button>' +
         '<div class="field-note" style="margin-top:8px;">Use this only to correct a mistaken entry (e.g. wrong Case ID typed). This cannot be undone.</div></fieldset>';
     }
 
     document.getElementById("detailBody").innerHTML = html;
     if(!closed) renderStageActions(c);
+    renderPhotoSection(c.id);
     if(state.editing){
       var delBtn = document.getElementById("deleteCaseBtn");
       if(delBtn) delBtn.addEventListener("click", function(){ confirmDelete(c.id); });
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Photo attachments — compressed client-side before upload (resized to
+  // ~1600px, JPEG ~0.75 quality) to stretch Supabase's free 1GB Storage
+  // tier. Bucket is private, so display goes through short-lived signed URLs.
+  // ---------------------------------------------------------------------
+  function compressImage(file, maxDim, quality){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(e){
+        var img = new Image();
+        img.onload = function(){
+          var w = img.width, h = img.height;
+          var scale = Math.min(1, maxDim / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = cw; canvas.height = ch;
+          canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+          canvas.toBlob(function(blob){ if(blob) resolve(blob); else reject(new Error("Couldn't process that image.")); }, "image/jpeg", quality);
+        };
+        img.onerror = function(){ reject(new Error("Couldn't read that image file.")); };
+        img.src = e.target.result;
+      };
+      reader.onerror = function(){ reject(new Error("Couldn't read that file.")); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadPhotos(caseId, fileList){
+    var files = Array.prototype.slice.call(fileList || []);
+    if(!files.length) return;
+    toast("Uploading " + files.length + " photo" + (files.length > 1 ? "s" : "") + "…");
+    for(var i = 0; i < files.length; i++){
+      try{
+        var blob = await compressImage(files[i], 1600, 0.75);
+        var path = caseId + "/" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + ".jpg";
+        var up = await state.sb.storage.from("case-photos").upload(path, blob, { contentType: "image/jpeg" });
+        if(up.error){ toast("Upload failed: " + up.error.message, "error"); continue; }
+        var ins = await state.sb.from("case_photos").insert({ case_id: caseId, storage_path: path, uploaded_by: state.session.user.email, size_bytes: blob.size });
+        if(ins.error){ toast("Saved the file but couldn't record it: " + ins.error.message, "error"); }
+      }catch(err){ toast("Upload failed: " + (err && err.message ? err.message : "unknown error"), "error"); }
+    }
+    toast("Done uploading.", "success");
+    renderPhotoSection(caseId);
+  }
+
+  async function renderPhotoSection(caseId){
+    var box = document.getElementById("photoSection");
+    if(!box || state.openCaseId !== caseId) return;
+    var res = await state.sb.from("case_photos").select("*").eq("case_id", caseId).order("uploaded_at", { ascending:false });
+    var photos = res.data || [];
+    var allRes = await state.sb.from("case_photos").select("size_bytes");
+    var totalBytes = (allRes.data || []).reduce(function(s, r){ return s + (r.size_bytes || 0); }, 0);
+    var totalMB = (totalBytes / 1048576).toFixed(1);
+
+    var html = '<fieldset><legend>Photos</legend>';
+    html += photos.length ? '<div class="photo-grid" id="photoGrid"></div>' : '<div class="field-note" style="margin-bottom:10px;">No photos attached to this case yet.</div>';
+    html += '<div class="field-note">~' + totalMB + ' MB used across all cases (of your 1GB free Supabase Storage allowance).</div>';
+    if(canWriteAtAll()){
+      html += '<div style="margin-top:10px;"><label class="btn small photo-add-label">+ Add Photo<input type="file" id="photoInput" accept="image/*" multiple style="display:none;"></label></div>';
+    }
+    html += '</fieldset>';
+    box.innerHTML = html;
+
+    if(photos.length){
+      var grid = document.getElementById("photoGrid");
+      photos.forEach(function(p){
+        var cell = document.createElement("div");
+        cell.className = "photo-thumb";
+        cell.innerHTML = '<div class="ph-loading">Loading…</div>';
+        grid.appendChild(cell);
+        state.sb.storage.from("case-photos").createSignedUrl(p.storage_path, 3600).then(function(sres){
+          if(sres.data && sres.data.signedUrl){
+            var img = document.createElement("img");
+            img.src = sres.data.signedUrl;
+            img.addEventListener("click", function(){ window.open(sres.data.signedUrl, "_blank"); });
+            cell.innerHTML = "";
+            cell.appendChild(img);
+          } else {
+            cell.innerHTML = '<div class="ph-loading">—</div>';
+          }
+        });
+      });
+    }
+
+    var input = document.getElementById("photoInput");
+    if(input) input.addEventListener("change", function(e){ uploadPhotos(caseId, e.target.files); e.target.value = ""; });
+  }
+
   function renderStageActions(c){
     var box = document.getElementById("stageActions");
     if(!box) return;
-    var disabled = !state.editing;
+    var disabled = !state.editing || !canDoStageAction(c.current_stage);
     var html = "";
+    if(state.editing && !canDoStageAction(c.current_stage)){
+      html += '<div class="field-note" style="width:100%;margin-bottom:4px;">Stage ' + c.current_stage + ' actions belong to ' +
+        esc(c.current_stage === 1 ? "Region Support" : c.current_stage === 2 ? "QCD" : "Production Control") +
+        ' — your role (' + esc(ROLE_LABELS[myRole()] || myRole()) + ') can view this case but not act on it here.</div>';
+    }
     if(c.current_stage === 1){
       html += actionBtn("actDispatch2", "Dispatch to Stage 2 (QCD)", "primary");
     } else if(c.current_stage === 2){
@@ -895,12 +1179,6 @@
       var existing = await state.sb.from("cases").select("id").eq("id", newCaseId).maybeSingle();
       if(existing.data){ toast("Case ID " + newCaseId + " already exists.", "error"); throw new Error("handled"); }
 
-      var r3 = await state.sb.from("cases").update(Object.assign({}, base, {
-        case_status:"Closed — Superseded", stage_status:"Superseded — New Box Issued",
-        linked_case_type:"reissued_as", linked_case_id: newCaseId, last_stage_change_at: ts
-      })).eq("id", c.id);
-      if(r3.error){ toast(r3.error.message, "error"); throw new Error("handled"); }
-
       var newRow = {
         id: newCaseId, case_origin:"Local", box_label: newBoxLabel || "",
         linked_case_type:"reissued_from", linked_case_id: c.id,
@@ -914,8 +1192,16 @@
         evaluation_notes: notes, action_taken: action, case_status: "In Progress",
         created_at: ts, updated_at: ts, last_stage_change_at: ts
       };
+      // Insert the new case row FIRST — the old row's linked_case_id foreign key
+      // can't point at a case that doesn't exist in the table yet.
       var insNew = await state.sb.from("cases").insert(newRow);
       if(insNew.error){ toast(insNew.error.message, "error"); throw new Error("handled"); }
+
+      var r3 = await state.sb.from("cases").update(Object.assign({}, base, {
+        case_status:"Closed — Superseded", stage_status:"Superseded — New Box Issued",
+        linked_case_type:"reissued_as", linked_case_id: newCaseId, last_stage_change_at: ts
+      })).eq("id", c.id);
+      if(r3.error){ toast(r3.error.message, "error"); throw new Error("handled"); }
 
       await logActivity(c.id, "Superseded — new box issued under Case " + newCaseId + ".");
       await logActivity(newCaseId, "New box issued — reissued from Case " + c.id + " after clearance at Evaluation & Reprocessing.");
