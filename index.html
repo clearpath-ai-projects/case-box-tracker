@@ -79,6 +79,36 @@
   .status-dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex-shrink:0; }
   .status-dot.live{ background:var(--pass); box-shadow:0 0 0 3px var(--pass-soft); }
   .status-dot.down{ background:var(--danger); box-shadow:0 0 0 3px var(--danger-soft); }
+  .notif-wrap{ position:relative; }
+  .notif-bell{
+    position:relative; width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+    border-radius:8px; border:1px solid var(--rule); background:var(--surface); cursor:pointer; font-size:15px; line-height:1;
+  }
+  .notif-bell:hover{ background:var(--surface-2); }
+  .notif-badge{
+    position:absolute; top:-5px; right:-5px; min-width:16px; height:16px; padding:0 4px; border-radius:9px;
+    background:var(--danger); color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  .notif-panel{
+    position:absolute; top:calc(100% + 8px); right:0; width:340px; max-height:min(70vh,520px); overflow-y:auto;
+    background:var(--surface); border:1px solid var(--rule); border-radius:12px; box-shadow:var(--shadow-lg); z-index:60; padding:4px 0;
+  }
+  .notif-section-title{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint);
+    padding:12px 16px 6px;
+  }
+  .notif-item{
+    display:block; width:100%; text-align:left; padding:9px 16px; border:0; border-top:1px solid var(--rule);
+    background:none; cursor:pointer; font-size:13px; color:var(--ink); font-family:inherit;
+  }
+  .notif-section-title + .notif-item{ border-top:0; }
+  .notif-item:hover{ background:var(--surface-2); }
+  .notif-item-top{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-weight:600; }
+  .notif-item-meta{ color:var(--ink-muted); font-size:12px; margin-top:2px; font-weight:400; }
+  .notif-item-days{ color:var(--danger); font-weight:700; white-space:nowrap; font-size:12px; }
+  .notif-empty{ padding:10px 16px 14px; font-size:12.5px; color:var(--ink-faint); }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--ink); cursor:pointer; padding-top:2px; }
+  .checkbox-row input{ width:15px; height:15px; cursor:pointer; accent-color:var(--accent); }
   .viewer-chip{
     font-size:12.5px; color:var(--ink-muted); padding:5px 10px; border-radius:20px; border:1px solid var(--rule);
     background:var(--surface); white-space:nowrap;
@@ -214,7 +244,7 @@
   .login-wrap{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
   .login-card{ width:100%; max-width:380px; background:var(--surface); border:1px solid var(--rule); border-radius:14px; box-shadow:var(--shadow-lg); padding:32px 28px; text-align:center; }
   .login-card .brand-mark{ margin:0 auto 16px; width:44px; height:44px; font-size:16px; }
-  .login-card h1{ font-size:19px; margin:0 0 6px; }
+  .login-card h1{ font-size:19px; margin:0 0 22px; }
   .login-card p{ font-size:13.5px; color:var(--ink-muted); line-height:1.55; margin:0 0 20px; }
   .login-card .input{ width:100%; margin-bottom:12px; padding:10px 12px; }
   .login-note{ font-size:11.5px; color:var(--ink-faint); margin-top:16px; line-height:1.5; }
@@ -256,9 +286,8 @@
 
 <div id="loginScreen" class="login-wrap" hidden>
   <div class="login-card">
-    <div class="brand-mark">CB</div>
+    <div class="brand-mark">CP</div>
     <h1>Case Box Tracker</h1>
-    <p>Sign in with your ClearPath email and password.</p>
     <input class="input" id="loginEmail" type="email" placeholder="you@clearpathortho.com.pk" autocomplete="username">
     <input class="input" id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" style="margin-top:10px;">
     <button class="btn primary block" id="loginBtn" type="button" style="margin-top:14px;">Sign In</button>
@@ -269,7 +298,7 @@
 <div id="app" hidden>
   <div class="topbar">
     <div class="brand">
-      <div class="brand-mark">CB</div>
+      <div class="brand-mark">CP</div>
       <div>
         <div class="brand-name">Case Box Tracker</div>
         <div class="brand-sub">Region Support &middot; QCD &middot; Production Control</div>
@@ -277,6 +306,12 @@
     </div>
     <div class="status-pill"><span class="status-dot" id="statusDot"></span><span id="statusText">Connecting&hellip;</span></div>
     <span class="viewer-chip" id="viewerChip">&mdash;</span>
+    <div class="notif-wrap">
+      <button class="notif-bell" id="notifBellBtn" type="button" title="Notifications" aria-label="Notifications">
+        &#128276;<span class="notif-badge" id="notifBadge" hidden>0</span>
+      </button>
+      <div class="notif-panel" id="notifPanel" hidden></div>
+    </div>
     <button class="btn ghost small" id="exportBtn" type="button">Export CSV</button>
     <button class="btn primary" id="newCaseBtn" type="button">+ New Case</button>
     <button class="btn ghost small" id="signOutBtn" type="button">Sign Out</button>
@@ -422,16 +457,22 @@
     assignment: [
       {name:"current_owner", label:"Current Owner", type:"text"},
       {name:"priority", label:"Priority", type:"select", options:["Low","Medium","High","Urgent"]}
+    ],
+    production: [
+      {name:"dispatch_method", label:"Dispatch Method", type:"select", options:["Courier","In-Person Pickup","Other"]},
+      {name:"tracking_number", label:"Tracking Number", type:"text"},
+      {name:"packaging_verified", label:"Packaging Verified", type:"checkbox", checkLabel:"Container & labeling checked"},
+      {name:"care_instructions_included", label:"Care Instructions Included", type:"checkbox", checkLabel:"Enclosed with the shipment"}
     ]
   };
 
   var state = {
     sb: null, session: null, profile: null,
-    cases: [], filtered: [],
+    cases: [], filtered: [], activity: [],
     filter: { q:"", stage:"", status:"", region:"", overdue:false },
     sort: { key:"days", dir:"desc" },
     openCaseId: null, editing: false,
-    renewTimer: null, casesChannel: null, detailChannel: null
+    renewTimer: null, casesChannel: null, detailChannel: null, activityChannel: null
   };
 
   var SORT_ACCESSORS = {
@@ -455,6 +496,14 @@
     catch(e){ return iso; }
   }
   function daysSince(iso){ if(!iso) return 0; return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime())/86400000)); }
+  function timeAgo(iso){
+    if(!iso) return "";
+    var sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime())/1000));
+    if(sec < 60) return "just now";
+    var min = Math.floor(sec/60); if(min < 60) return min + "m ago";
+    var hr = Math.floor(min/60); if(hr < 24) return hr + "h ago";
+    var day = Math.floor(hr/24); return day + "d ago";
+  }
   function stageBadgeClass(stage){ return "badge stage" + stage; }
   function priorityBadgeClass(p){ var m = {Low:"pr-low", Medium:"pr-medium", High:"pr-high", Urgent:"pr-urgent"}; return "badge " + (m[p] || "pr-low"); }
   function isOpenCase(c){ return c.case_status === "Open" || c.case_status === "In Progress" || c.case_status === "On Hold"; }
@@ -515,6 +564,7 @@
     if(r === "admin") return true;
     if(group === "intake") return r === "region_support";
     if(group === "resolution") return r === "qcd";
+    if(group === "production") return r === "production_control";
     return false;
   }
   function canDoStageAction(stage){
@@ -524,6 +574,11 @@
     if(stage === 2) return r === "qcd";
     if(stage === 3) return r === "production_control";
     return false;
+  }
+  function overdueForMe(){
+    return state.cases.filter(function(c){
+      return isOpenCase(c) && daysSince(c.last_stage_change_at) >= 7 && canDoStageAction(c.current_stage);
+    });
   }
 
   async function loadProfile(){
@@ -578,15 +633,22 @@
     var res = await state.sb.from("cases").select("*").order("updated_at", { ascending:false }).limit(500);
     if(res.error){ toast("Couldn't load cases: " + res.error.message, "error"); setStatus(false, "Error"); return; }
     state.cases = res.data || [];
-    applyFilters(); renderStats(); renderTable();
+    applyFilters(); renderStats(); renderTable(); renderNotifications();
     if(state.openCaseId){
       var found = state.cases.find(function(c){ return c.id === state.openCaseId; });
       if(found) refreshDetail(found.id);
     }
   }
 
+  async function fetchRecentActivity(){
+    var res = await state.sb.from("case_activity_log").select("*").order("ts", { ascending:false }).limit(20);
+    if(!res.error) state.activity = res.data || [];
+    renderNotifications();
+  }
+
   function subscribeCases(){
     fetchCases();
+    fetchRecentActivity();
     if(state.casesChannel) state.sb.removeChannel(state.casesChannel);
     state.casesChannel = state.sb.channel("cases-list")
       .on("postgres_changes", { event:"*", schema:"public", table:"cases" }, function(){ fetchCases(); })
@@ -594,7 +656,75 @@
         if(status === "SUBSCRIBED") setStatus(true, "Live");
         else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") setStatus(false, "Connection issue");
       });
+    if(state.activityChannel) state.sb.removeChannel(state.activityChannel);
+    state.activityChannel = state.sb.channel("activity-feed")
+      .on("postgres_changes", { event:"INSERT", schema:"public", table:"case_activity_log" }, function(){ fetchRecentActivity(); })
+      .subscribe();
   }
+
+  // ---------------------------------------------------------------------
+  // Notifications bell — overdue cases this role can act on, + an
+  // org-wide recent-activity feed from case_activity_log.
+  // ---------------------------------------------------------------------
+  function renderNotifications(){
+    var badge = document.getElementById("notifBadge");
+    var panel = document.getElementById("notifPanel");
+    if(!badge || !panel) return;
+
+    var overdue = overdueForMe();
+    if(overdue.length > 0){
+      badge.hidden = false;
+      badge.textContent = overdue.length > 99 ? "99+" : String(overdue.length);
+    } else {
+      badge.hidden = true;
+    }
+
+    var sections = "";
+    if(canWriteAtAll()){
+      sections += '<div class="notif-section-title">Needs Your Attention</div>';
+      sections += overdue.length
+        ? overdue.slice(0, 8).map(function(c){
+            var who = [c.patient_name, c.treating_doctor].filter(Boolean).join(" / ");
+            return '<button class="notif-item" type="button" data-notif-case="' + esc(c.id) + '">' +
+              '<div class="notif-item-top"><span>' + esc(c.id) + (who ? " · " + esc(who) : "") + '</span>' +
+              '<span class="notif-item-days">' + daysSince(c.last_stage_change_at) + 'd</span></div>' +
+              '<div class="notif-item-meta">Stage ' + c.current_stage + ' · ' + esc(c.stage_status || "—") + '</div>' +
+              '</button>';
+          }).join("")
+        : '<div class="notif-empty">Nothing overdue right now.</div>';
+    }
+
+    sections += '<div class="notif-section-title">Recent Activity</div>';
+    sections += state.activity.length
+      ? state.activity.slice(0, 12).map(function(a){
+          return '<button class="notif-item" type="button" data-notif-case="' + esc(a.case_id) + '">' +
+            '<div class="notif-item-top"><span>' + esc(a.case_id) + '</span>' +
+            '<span class="notif-item-meta">' + timeAgo(a.ts) + '</span></div>' +
+            '<div class="notif-item-meta">' + esc(a.note || "") + (a.actor ? " — " + esc(a.actor) : "") + '</div>' +
+            '</button>';
+        }).join("")
+      : '<div class="notif-empty">No recent activity yet.</div>';
+
+    panel.innerHTML = sections;
+  }
+
+  (function setupNotifBell(){
+    var bell = document.getElementById("notifBellBtn");
+    var panel = document.getElementById("notifPanel");
+    bell.addEventListener("click", function(e){
+      e.stopPropagation();
+      panel.hidden = !panel.hidden;
+    });
+    panel.addEventListener("click", function(e){
+      var item = e.target.closest("[data-notif-case]");
+      if(!item) return;
+      panel.hidden = true;
+      openDetail(item.getAttribute("data-notif-case"));
+    });
+    document.addEventListener("click", function(e){
+      if(!panel.hidden && !panel.contains(e.target) && e.target !== bell){ panel.hidden = true; }
+    });
+  })();
 
   // ---------------------------------------------------------------------
   // Filtering / stats / table (same logic as before, snake_case fields)
@@ -802,7 +932,9 @@
     var inputs = document.querySelectorAll("#detailBody [data-edit-field]");
     if(inputs.length === 0){ toast("Nothing editable here for your role.", "error"); return; }
     var patch = {};
-    Array.prototype.forEach.call(inputs, function(el){ patch[el.getAttribute("data-edit-field")] = el.value; });
+    Array.prototype.forEach.call(inputs, function(el){
+      patch[el.getAttribute("data-edit-field")] = el.type === "checkbox" ? el.checked : el.value;
+    });
     var btn = document.getElementById("saveEditBtn");
     btn.disabled = true;
     try{
@@ -847,6 +979,12 @@
   // as a read-only value — same shape either way so layout doesn't jump.
   function efield(def, c, editable){
     var val = c[def.name];
+    if(def.type === "checkbox"){
+      if(editable){
+        return '<div class="field"><label>'+esc(def.label)+'</label><label class="checkbox-row"><input type="checkbox" data-edit-field="'+def.name+'"'+(val?' checked':'')+'><span>'+esc(def.checkLabel||"Yes")+'</span></label></div>';
+      }
+      return '<div class="field"><label>'+esc(def.label)+'</label><div style="font-size:13.5px;color:var(--ink);font-weight:500;padding-top:2px;">'+(val?"✓ Yes":"Not yet")+'</div></div>';
+    }
     if(editable){
       if(def.type === "select"){
         var opts = '<option value="">Select…</option>' + def.options.map(function(o){ return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>'; }).join("");
@@ -901,6 +1039,7 @@
     var canIntake = state.editing && canEditGroup("intake");
     var canRes = state.editing && canEditGroup("resolution");
     var canAssign = state.editing && canWriteAtAll();
+    var canProd = state.editing && canEditGroup("production");
 
     html += '<fieldset><legend>Identification</legend><div class="field-grid">' +
       FIELD_DEFS.identification.map(function(f){ return efield(f, c, canIntake); }).join("") +
@@ -936,6 +1075,11 @@
       html += etextarea("evaluation_notes", "Evaluation Notes", c.evaluation_notes, canRes, "What was actually found");
       html += etextarea("action_taken", "Action Taken", c.action_taken, canRes, "What was reprocessed / remanufactured");
       html += '</fieldset>';
+    }
+
+    if(c.dispatch_method || c.tracking_number || c.packaging_verified || c.care_instructions_included || canProd){
+      html += '<fieldset><legend>Production</legend><div class="field-grid">' +
+        FIELD_DEFS.production.map(function(f){ return efield(f, c, canProd); }).join("") + '</div></fieldset>';
     }
 
     html += '<fieldset><legend>Activity Log</legend><ul class="log-list">' +
