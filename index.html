@@ -136,7 +136,8 @@
   /* ---- Layout ---- */
   #app{ display:flex; flex-direction:column; min-height:100vh; }
   .page{ flex:1 1 auto; display:flex; flex-direction:column; max-width:1180px; width:100%; margin:0 auto; padding:24px 20px 24px; box-sizing:border-box; }
-  .page .app-footer{ margin-top:auto; padding:22px 0 8px; }
+  .result-count-end{ margin-top:auto; text-align:center; padding-top:6px; }
+  .page .app-footer{ padding:6px 0 8px; }
   .stat-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:22px; }
   .stat-tile{ background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:16px; box-shadow:var(--shadow); cursor:pointer; }
   .stat-tile.active{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
@@ -355,8 +356,6 @@
         <input class="input date-range-input" type="date" id="filterDateTo" aria-label="To date">
       </div>
       <button class="select-btn" id="exportBtn" type="button">Export</button>
-      <div class="spacer"></div>
-      <span class="field-note" id="resultCount"></span>
     </div>
 
     <div class="table-card">
@@ -377,6 +376,7 @@
       </div>
     </div>
 
+    <div class="field-note result-count-end" id="resultCount"></div>
     <div class="app-footer">Copyright &copy; 2026, ClearPath Orthodontics. All Rights Reserved.</div>
   </div>
 </div>
