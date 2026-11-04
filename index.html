@@ -143,14 +143,15 @@
   .stat-num{ font-size:26px; font-weight:700; letter-spacing:-0.01em; line-height:1; margin-bottom:6px; color:var(--accent-deep); }
   .stat-label{ font-size:12px; color:var(--ink-muted); }
   .stat-tile.crit .stat-num{ color:var(--danger); }
-  .toolbar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .toolbar{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
   .input, .select, .select-btn{ background:var(--surface); border:1px solid var(--rule-strong); border-radius:7px; padding:8px 11px; font-size:13.5px; color:var(--ink); }
   .select-btn{ appearance:none; cursor:pointer; font-family:inherit; font-weight:500; line-height:1.2; }
   .select-btn:hover{ background:var(--surface-2); }
   .input:focus, .select:focus, .select-btn:focus, textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
-  .search-input{ min-width:220px; flex:1 1 220px; }
-  .date-range{ display:flex; align-items:center; gap:7px; }
-  .date-range-input{ width:142px; }
+  .search-input{ width:180px; flex:0 0 auto; }
+  .toolbar .select{ width:136px; flex:0 0 auto; }
+  .date-range{ display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+  .date-range-input{ width:116px; }
   .toolbar .spacer{ flex:1 1 auto; }
 
   /* ---- Table ---- */
@@ -348,7 +349,7 @@
         <option>Lahore</option><option>Islamabad</option><option>Karachi</option>
       </select>
       <div class="date-range" title="Filter by Date Received">
-        <span class="field-note">Date Received</span>
+        <span class="field-note">Received</span>
         <input class="input date-range-input" type="date" id="filterDateFrom" aria-label="From date">
         <span class="date-range-sep">&ndash;</span>
         <input class="input date-range-input" type="date" id="filterDateTo" aria-label="To date">
