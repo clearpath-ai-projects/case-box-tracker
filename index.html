@@ -141,8 +141,10 @@
   .stat-label{ font-size:12px; color:var(--ink-muted); }
   .stat-tile.crit .stat-num{ color:var(--danger); }
   .toolbar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
-  .input, .select{ background:var(--surface); border:1px solid var(--rule-strong); border-radius:7px; padding:8px 11px; font-size:13.5px; color:var(--ink); }
-  .input:focus, .select:focus, textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .input, .select, .select-btn{ background:var(--surface); border:1px solid var(--rule-strong); border-radius:7px; padding:8px 11px; font-size:13.5px; color:var(--ink); }
+  .select-btn{ appearance:none; cursor:pointer; font-family:inherit; font-weight:500; line-height:1.2; }
+  .select-btn:hover{ background:var(--surface-2); }
+  .input:focus, .select:focus, .select-btn:focus, textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
   .search-input{ min-width:220px; flex:1 1 220px; }
   .toolbar .spacer{ flex:1 1 auto; }
 
@@ -325,23 +327,23 @@
     <div class="stat-grid" id="statGrid"></div>
 
     <div class="toolbar">
-      <input class="input search-input" id="searchInput" type="text" placeholder="Search Case ID, patient, or doctor&hellip;">
+      <input class="input search-input" id="searchInput" type="text" placeholder="Search">
       <select class="select" id="filterStage">
-        <option value="">All stages</option>
+        <option value="">All Stages</option>
         <option value="1">Stage 1 &middot; Intake &amp; Case Logging</option>
         <option value="2">Stage 2 &middot; Evaluation &amp; Reprocessing</option>
         <option value="3">Stage 3 &middot; Remanufacture &amp; Dispatch</option>
       </select>
       <select class="select" id="filterStatus">
-        <option value="">All case statuses</option>
+        <option value="">All Statuses</option>
         <option>Open</option><option>In Progress</option><option>On Hold</option>
         <option>Resolved — Closed</option><option>Closed — Superseded</option>
       </select>
       <select class="select" id="filterRegion">
-        <option value="">All regions</option>
+        <option value="">All Regions</option>
         <option>Lahore</option><option>Islamabad</option><option>Karachi</option>
       </select>
-      <button class="btn ghost small" id="exportBtn" type="button">Export CSV</button>
+      <button class="select-btn" id="exportBtn" type="button">Export</button>
       <div class="spacer"></div>
       <span class="field-note" id="resultCount"></span>
     </div>
